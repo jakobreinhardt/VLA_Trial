@@ -15,7 +15,7 @@ set "RESUME=false"
 if exist "%USERPROFILE%\.cache\huggingface\lerobot\%HF_USER%\%DATASET%\meta\info.json" set "RESUME=true"
 echo Task: %TASK%   episodes: %N%   append to existing dataset: %RESUME%
 
-lerobot-record ^
+python "%~dp0record_cues.py" ^
   --robot.type=so101_follower --robot.port=%FOLLOWER_PORT% --robot.id=follower ^
   --robot.cameras="%CAMERAS%" ^
   --teleop.type=so101_leader --teleop.port=%LEADER_PORT% --teleop.id=%LEADER_ID% ^

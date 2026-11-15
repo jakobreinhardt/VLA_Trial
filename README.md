@@ -51,7 +51,14 @@ scripts\record.bat blue 10
 Abwechselnd in 10er-Blöcken, bis **mindestens 30 pro Farbe** (besser 50) im Datensatz sind.
 Jeder weitere Aufruf hängt an denselben Datensatz `HF_USER/so101_blocks_into_box` an.
 
-- Episode: 20 s, danach 20 s zum Zurücksetzen (mit `→` früher weiter).
+- Episode: 20 s, danach 20 s zum Zurücksetzen (mit `→` jeweils früher weiter).
+- Signale (statt der verzögerten LeRobot-Sprachansage, siehe `scripts/record_cues.py`):
+  **1 hoher Piep** = Aufnahme läuft, sofort losbewegen · **2 tiefe Pieps** = Episode vorbei, zurücksetzen ·
+  **3 kurze Pieps** = Episode verworfen, wird wiederholt.
+- Hand schon vor dem Piep am Leader haben und sofort losbewegen (kein Warten am Anfang).
+- `→` einmal drücken, sobald der Arm wieder in Ruheposition ist (beendet die Episode). Erst wenn
+  zurückgesetzt ist, `→` ein zweites Mal (beendet die Pause). Zweimal schnell hintereinander überspringt
+  das Zurücksetzen!
 - `→` / `n`: Episode früher beenden · `←` / `r`: Episode verwerfen und neu · `Esc` / `q`: Sitzung beenden
 - Am Ende jeder Sitzung wird der Datensatz (privat) zu Hugging Face hochgeladen.
 
