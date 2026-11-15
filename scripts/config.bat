@@ -3,6 +3,8 @@ rem Shared settings for all scripts. Edit HF_USER once after `hf auth login`.
 set "HF_USER=JRrobots4all"
 set "DATASET=so101_blocks_into_box"
 set "MODEL=smolvla_so101_blocks_into_box"
+rem Local dataset folder (LeRobot needs it explicitly to append to an existing dataset).
+set "DATA_ROOT=%USERPROFILE%\.cache\huggingface\lerobot\%HF_USER%\%DATASET%"
 
 set "FOLLOWER_PORT=COM6"
 set "LEADER_PORT=COM7"

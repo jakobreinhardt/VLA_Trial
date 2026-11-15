@@ -12,14 +12,14 @@ set "N=%~2"
 if "%N%"=="" set "N=10"
 
 set "RESUME=false"
-if exist "%USERPROFILE%\.cache\huggingface\lerobot\%HF_USER%\%DATASET%\meta\info.json" set "RESUME=true"
+if exist "%DATA_ROOT%\meta\info.json" set "RESUME=true"
 echo Task: %TASK%   episodes: %N%   append to existing dataset: %RESUME%
 
 python "%~dp0record_cues.py" ^
   --robot.type=so101_follower --robot.port=%FOLLOWER_PORT% --robot.id=follower ^
   --robot.cameras="%CAMERAS%" ^
   --teleop.type=so101_leader --teleop.port=%LEADER_PORT% --teleop.id=%LEADER_ID% ^
-  --dataset.repo_id=%HF_USER%/%DATASET% --dataset.no_stamp=true --resume=%RESUME% ^
+  --dataset.repo_id=%HF_USER%/%DATASET% --dataset.root="%DATA_ROOT%" --dataset.no_stamp=true --resume=%RESUME% ^
   --dataset.single_task="%TASK%" ^
   --dataset.num_episodes=%N% --dataset.episode_time_s=20 --dataset.reset_time_s=20 ^
   --dataset.private=true ^
