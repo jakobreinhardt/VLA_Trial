@@ -1,102 +1,83 @@
-# VLA_Trial – SmolVLA auf dem SO-101
+# VLA_Trial: teaching a robot arm to follow language instructions
 
-Ziel: Der Follower greift auf Anweisung den **grünen** oder den **blauen** Holzklotz
-und legt ihn in die **rote runde Box**. Modell: [SmolVLA](https://huggingface.co/lerobot/smolvla_base)
-(450M), feingetunt auf eigenen Demonstrationen.
+A hobby experiment in **vision-language-action (VLA) models** on low-cost hardware. A
+[SO-101](https://github.com/TheRobotStudio/SO-ARM100) robot arm is given a plain-English command
+and has to pick the right block:
 
-| Aufgabe (Sprachbefehl) | |
+> *"Pick up the **green** block and put it in the red box."*
+> *"Pick up the **blue** block and put it in the red box."*
+
+The policy is [SmolVLA](https://huggingface.co/lerobot/smolvla_base), a 450M-parameter VLA from
+Hugging Face, fine-tuned on demonstrations I recorded myself with
+[LeRobot](https://github.com/huggingface/lerobot).
+
+## The idea
+
+Most beginner robot-learning demos teach a single motion: "pick up the thing". Here **both blocks are
+always on the table**, and only the one named in the command goes into the box. To do the task, the
+model has to read the instruction and connect the colour word to what it sees in the camera images.
+Copying the motions it saw during training is not enough.
+
+## How it works
+
+```mermaid
+flowchart LR
+    A["Teleoperation<br/>leader arm → follower arm<br/>2 cameras, 30 fps"] --> B["Dataset<br/>on Hugging Face Hub"]
+    B --> C["Fine-tune SmolVLA<br/>free Colab T4 GPU"]
+    C --> D["Model<br/>on Hugging Face Hub"]
+    D --> E["Rollout<br/>policy drives the follower<br/>(laptop CPU)"]
+```
+
+1. **Record:** I move a *leader* arm by hand while the *follower* arm copies it. Two cameras (one from
+   above, one from the side) and the joint positions are recorded at 30 fps, together with the
+   language instruction for that episode.
+2. **Train:** The laptop has no NVIDIA GPU, so SmolVLA is fine-tuned in a free Google Colab notebook.
+   Checkpoints go to the Hugging Face Hub so that a dropped session can resume.
+3. **Run:** The fine-tuned model runs on the laptop CPU and controls the follower arm on its own,
+   given only the camera images, the joint state and the instruction.
+
+## Dataset
+
+📦 **[JRrobots4all/so101_blocks_into_box](https://huggingface.co/datasets/JRrobots4all/so101_blocks_into_box)** on the Hugging Face Hub
+
+| | |
 |---|---|
-| `Pick up the green block and put it in the red box.` | grün |
-| `Pick up the blue block and put it in the red box.` | blau |
+| Format | LeRobot dataset v3.0 |
+| Robot | SO-101 follower (6 joints including gripper), teleoperated with an SO-101 leader |
+| Cameras | `top` (angled from above) and `side` (from the front/side), 640×480 @ 30 fps |
+| Tasks | 2 language instructions (green block / blue block) |
+| Size | 60 episodes, ~20k frames (~11.5 min), and growing |
 
-Weil das Modell die Farbe aus dem Befehl lernen soll, liegen **bei jeder Aufnahme beide Klötze**
-auf dem Tisch, und nur der genannte wird in die Box gelegt. Arbeitsbereich = Fläche innerhalb
-des gelben Kreppbands.
+You can browse the episodes in the browser with the
+[LeRobot dataset visualizer](https://huggingface.co/spaces/lerobot/visualize_dataset).
 
 ## Hardware
 
-- Follower `COM6`, Leader `COM7` (Laptop, Miniforge Prompt, env `lerobot`)
-- Kameras: zwei Kit-Kameras an Tischarmen, `top` (schräg von oben) und `side` (seitlich/vorne),
-  640×480 @ 30 fps, MJPG. OpenCV-Index 0 ist die Laptop-Webcam.
-- Leader-Kalibrierung: Die Motoren passen zur Datei `so_leader\None.json`, daher `LEADER_ID=None`.
+- SO-101 leader + follower arm pair
+- Two USB kit cameras on desk clamps
+- A Windows laptop without a dedicated GPU (recording and inference)
+- Google Colab free tier (training)
+- Two wooden blocks (green and blue), a round red box, and masking tape to mark the workspace
 
-Alle Einstellungen stehen in [`scripts/config.bat`](scripts/config.bat).
+## Repository layout
 
-## Ablauf
-
-Alle Befehle im **Miniforge Prompt**, im Ordner `Desktop\VLA_Trial`, nach `conda activate lerobot`.
-
-### 1. Einmalig vorbereiten
 ```
-pip install -e "C:\Users\jakob\lerobot[smolvla]"
-hf auth login
+colab/train_smolvla.ipynb   Fine-tuning notebook (Colab / RunPod)
+scripts/config.bat          Ports, camera indices, Hugging Face repo names, task strings
+scripts/preview_cameras.py  Live camera preview for aiming and focusing the cameras
+scripts/record.bat          Record teleoperated demonstrations
+scripts/record_cues.py      lerobot-record wrapper with instant audio cues
+scripts/rollout.bat         Run the trained policy on the robot
+scripts/bench_train.py      Measure training speed and estimate total training time
 ```
-Token mit **Write**-Rechten von https://huggingface.co/settings/tokens. Danach in
-`scripts\config.bat` `HF_USER` auf deinen Hugging-Face-Namen setzen.
 
-### 2. Kameras ausrichten und fixieren
-```
-python scripts\preview_cameras.py
-```
-- Beide Klötze, der ganze Greifbereich und der Greifer müssen im Bild sein.
-- Objektiv scharf stellen, Kameraarme festziehen, Positionen auf der Platte markieren.
-- `s` speichert Referenzbilder nach `reference\`, `q` beendet.
-- Stimmen die Indizes nicht, mit `python scripts\preview_cameras.py 2 1` testen und in `config.bat` anpassen.
+## Reproducing it
 
-### 3. Demonstrationen aufnehmen
-```
-scripts\record.bat green 10
-scripts\record.bat blue 10
-```
-Abwechselnd in 10er-Blöcken, bis **mindestens 30 pro Farbe** (besser 50) im Datensatz sind.
-Jeder weitere Aufruf hängt an denselben Datensatz `HF_USER/so101_blocks_into_box` an.
+Step-by-step setup, recording guidelines, training and rollout are in
+**[DEVELOPMENT.md](DEVELOPMENT.md)**.
 
-- Episode: 20 s, danach 20 s zum Zurücksetzen (mit `→` jeweils früher weiter).
-- Signale (statt der verzögerten LeRobot-Sprachansage, siehe `scripts/record_cues.py`):
-  **1 hoher Piep** = Aufnahme läuft, sofort losbewegen · **2 tiefe Pieps** = Episode vorbei, zurücksetzen ·
-  **3 kurze Pieps** = Episode verworfen, wird wiederholt.
-- Hand schon vor dem Piep am Leader haben und sofort losbewegen (kein Warten am Anfang).
-- `→` einmal drücken, sobald der Arm wieder in Ruheposition ist (beendet die Episode). Erst wenn
-  zurückgesetzt ist, `→` ein zweites Mal (beendet die Pause). Zweimal schnell hintereinander überspringt
-  das Zurücksetzen!
-- `→` / `n`: Episode früher beenden · `←` / `r`: Episode verwerfen und neu · `Esc` / `q`: Sitzung beenden
-- Am Ende jeder Sitzung wird der Datensatz (privat) zu Hugging Face hochgeladen.
+## Built with
 
-**Gute Daten:**
-- Die Box steht immer an derselben Stelle: Position mit Kreppband markieren und nach jedem Zurücksetzen
-  genau dort hinstellen. (Variieren erst, wenn das Grundmodell funktioniert.)
-- Klotzpositionen innerhalb des Kreppbands variieren, aber systematisch: z. B. 5 markierte Positionen,
-  jeweils mehrmals. Mal grün näher an der Box, mal blau.
-- Gleiche Bewegung jedes Mal: anfahren, greifen, anheben, über die Box, loslassen, zurück in Ruheposition.
-- In der Pause zwischen den Episoden den Klotz aus der Box nehmen und beide Klötze neu hinlegen.
-- Ruhig und flüssig führen, nicht zögern. Fehlversuche mit `←` verwerfen.
-- Nichts außer Arm und Klötzen soll sich im Bild bewegen. Leader außerhalb des Kamerabilds.
-- Licht und Kameras zwischen den Sitzungen nicht verändern.
-- Nach der ersten Sitzung die Cadence-Zeile prüfen: Sie sollte nahe 30 Hz liegen.
-
-Datensatz ansehen: https://huggingface.co/spaces/lerobot/visualize_dataset (eingeloggt, da privat).
-
-### 4. Training in Google Colab (kostenlos)
-Der Laptop hat keine NVIDIA-GPU; Training auf der CPU würde Tage dauern. Stattdessen:
-
-1. [colab/train_smolvla.ipynb](colab/train_smolvla.ipynb) in Colab öffnen:
-   https://colab.research.google.com → **Datei → Notebook hochladen** (oder bei öffentlichem Repo
-   über den Reiter **GitHub**).
-2. Den Anweisungen oben im Notebook folgen: T4-GPU wählen, `HF_TOKEN` als Secret anlegen,
-   `HF_USER` eintragen, Zellen 1–5 ausführen.
-3. Alle 2000 Schritte wird ein Checkpoint auf Hugging Face gesichert. Wird die kostenlose Sitzung
-   getrennt: Notebook neu öffnen, Zellen 1–4 ausführen, dann Zelle 6 (Fortsetzen).
-
-Eine T4 ist deutlich langsamer als die A100 aus der LeRobot-Doku (20 000 Schritte ≈ 4–5 h);
-rechne mit mehreren Sitzungen. Das fertige Modell landet privat unter
-`HF_USER/smolvla_so101_blocks_into_box`.
-
-### 5. Auf dem Roboter testen
-```
-scripts\rollout.bat green
-scripts\rollout.bat blue
-```
-Läuft 60 s (zweites Argument ändert die Dauer). Mit Strg+C abbrechen und dabei den Arm festhalten.
-Das Modell läuft dabei auf der Laptop-CPU. Bewegt sich der Arm ruckelig oder mit Pausen, hilft
-RTC: in `rollout.bat` `--inference.type=rtc --inference.rtc.execution_horizon=10 --inference.rtc.max_guidance_weight=10.0`
-ergänzen.
+- [LeRobot](https://github.com/huggingface/lerobot) by Hugging Face: recording, training and inference
+- [SmolVLA](https://huggingface.co/blog/smolvla): the base vision-language-action model
+- [SO-ARM100 / SO-101](https://github.com/TheRobotStudio/SO-ARM100) by The Robot Studio: the open-source arm
