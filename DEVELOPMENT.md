@@ -108,7 +108,8 @@ private).
 
 ### 4. Train in Google Colab (free)
 
-The laptop has no NVIDIA GPU, and training on the CPU would take days. Instead:
+The laptop has no NVIDIA GPU and cannot train: in a test on the CPU (batch 8), not even 2 training
+steps finished in 22 minutes, because 16 GB of RAM is not enough and Windows kept swapping. Instead:
 
 1. Open [colab/train_smolvla.ipynb](colab/train_smolvla.ipynb) in Colab:
    https://colab.research.google.com → **File → Upload notebook** (or use the **GitHub** tab if the
@@ -137,7 +138,9 @@ python scripts\bench_train.py --device cpu  --batch 8  --steps 12  --log 2      
 python scripts\bench_train.py --device cuda --batch 64 --steps 110 --log 10     (GPU)
 ```
 
-Add `--root <local dataset folder>` to skip the download. The dataset repo is hard-coded in the script
+The laptop command is only useful as a smoke test (see above). On Windows the script loads
+`smolvla_base` from a local download, because LeRobot turns a Hub id like `lerobot/smolvla_base` into
+an invalid path with a backslash there. Add `--root <local dataset folder>` to skip the dataset download. The dataset repo is hard-coded in the script
 (`REPO`).
 
 ### 5. Test on the robot
@@ -147,7 +150,8 @@ scripts\rollout.bat green
 scripts\rollout.bat blue
 ```
 
-Runs for 60 s (a second argument changes the duration). Stop with Ctrl+C and hold the arm while doing
+It first downloads the model to `models\` (without the training checkpoints; LeRobot on Windows cannot
+load a Hub id directly, see above), then runs for 60 s (a second argument changes the duration). Stop with Ctrl+C and hold the arm while doing
 so. The model runs on the laptop CPU. If the arm moves jerkily or with pauses, try RTC (real-time
 chunking): add
 `--inference.type=rtc --inference.rtc.execution_horizon=10 --inference.rtc.max_guidance_weight=10.0`
