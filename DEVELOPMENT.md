@@ -50,8 +50,9 @@ hf auth login
 Use a token with **write** access from https://huggingface.co/settings/tokens. Then set `HF_USER` in
 `scripts\config.bat` to your Hugging Face user name.
 
-The Colab notebook pins LeRobot to commit `3f797de5` (`LEROBOT_REV`) so that it matches the laptop.
-If you update LeRobot on the laptop, update `LEROBOT_REV` as well.
+[`runpod/setup.sh`](runpod/setup.sh) pins LeRobot on the training GPU to commit `3f797de5`
+(`LEROBOT_REV`) so that it matches the laptop. If you update LeRobot on the laptop, update
+`LEROBOT_REV` as well.
 
 ### 2. Align and fix the cameras
 
@@ -106,53 +107,92 @@ appends to the same dataset `HF_USER/so101_blocks_into_box`. `record.bat` detect
 View the dataset: https://huggingface.co/spaces/lerobot/visualize_dataset (log in if the dataset is
 private).
 
-### 4. Train in Google Colab (free)
+### 4. Train on RunPod (RTX 4090)
 
 The laptop has no NVIDIA GPU and cannot train: in a test on the CPU (batch 8), not even 2 training
-steps finished in 22 minutes, because 16 GB of RAM is not enough and Windows kept swapping. Instead:
+steps finished in 22 minutes, because 16 GB of RAM is not enough and Windows kept swapping. Training
+runs on a rented RTX 4090 on [RunPod](https://www.runpod.io) instead, driven over SSH with the
+scripts in [`runpod/`](runpod):
 
-1. Open [colab/train_smolvla.ipynb](colab/train_smolvla.ipynb) in Colab:
-   https://colab.research.google.com → **File → Upload notebook** (or use the **GitHub** tab if the
-   repo is public).
-2. Follow the instructions at the top of the notebook: select a T4 GPU, add `HF_TOKEN` as a secret,
-   set `HF_USER`, run sections 1–4, then section 5 (start training).
-3. A checkpoint is pushed to Hugging Face every 2000 steps (`SAVE_FREQ`). If the free session
-   disconnects, reopen the notebook, run sections 1–4, then section 6 (resume) instead of section 5.
+| Script | Purpose |
+|---|---|
+| `setup.sh` | One-time: Python 3.12 venv + LeRobot (pinned commit) + SmolVLA extras on the `/workspace` volume |
+| `train.sh` | Fine-tunes `lerobot/smolvla_base` on the dataset: batch 64, 20,000 steps, checkpoint every 2000 steps |
+| `autostop.sh` | Waits until training has ended (or crashed), then stops the pod so it stops costing GPU money |
 
-`BATCH` is 32 by default, which fits a T4 (16 GB). Lower it to 16 on `CUDA out of memory`.
+**Measured on the 4090** (fp32, batch 64): 0.55 s/step and 14.4 GB of 24 GB VRAM, so 20,000 steps
+take about 3 h (≈ $3 at $0.89/h). Data loading is not a bottleneck.
 
-A T4 is much slower than the A100 used in the LeRobot docs (20,000 steps ≈ 4–5 h there), so expect
-several sessions. The finished model is pushed privately to `HF_USER/smolvla_so101_blocks_into_box`.
+1. **SSH key:** the laptop's public key (`%USERPROFILE%\.ssh\id_ed25519.pub`) must be listed under
+   **Credentials → SSH Public Keys** *before* the pod is created. RunPod copies the keys into a pod
+   only when it starts.
+2. **Deploy a pod:** Pods → Deploy, 1× RTX 4090, On-Demand, template *PyTorch 2.8.0*, container disk
+   50 GB, volume disk 50 GB at `/workspace`, *SSH terminal access* on (TCP port 22 is exposed by
+   default). When it runs, **Connect → SSH over exposed TCP** shows `ssh root@IP -p PORT ...`.
+3. **Set up and start** (Git Bash on the laptop, in this folder; replace `IP` and `PORT`). The second
+   command copies the Hugging Face token to the pod without printing it:
 
-The notebook also runs on RunPod / JupyterLab: it uses `/content` (Colab) or `/workspace` (RunPod)
-as its working directory, whichever exists.
+   ```
+   scp -P PORT runpod/*.sh root@IP:/workspace/
+   ssh -p PORT root@IP "mkdir -p /workspace/hf && cat > /workspace/hf/token && chmod 600 /workspace/hf/token" < ~/.cache/huggingface/token
+   ssh -p PORT root@IP "bash /workspace/setup.sh"
+   ssh -p PORT root@IP 'tmux new-session -d -s train "bash /workspace/train.sh > /workspace/train.log 2>&1"; tmux new-session -d -s autostop "bash /workspace/autostop.sh"'
+   ```
 
-#### Estimating training time
+   Training runs in `tmux`, so it continues when the SSH connection drops or the laptop sleeps.
+4. **Watch progress:**
 
-Before committing to a long run, the optional benchmark section of the notebook (or
-`scripts/bench_train.py` locally) trains for about 2 minutes on the real dataset without saving or
-uploading anything, and extrapolates to a full run (20,000 steps × batch 64, as in the SmolVLA docs):
+   ```
+   ssh -p PORT root@IP "tr '\r' '\n' < /workspace/train.log | grep -a step: | tail -3"
+   ```
 
-```
-python scripts\bench_train.py --device cpu  --batch 8  --steps 12  --log 2      (laptop)
-python scripts\bench_train.py --device cuda --batch 64 --steps 110 --log 10     (GPU)
-```
+5. **Results:** every 2000 steps a checkpoint is pushed privately to
+   `HF_USER/smolvla_so101_blocks_into_box` under `checkpoints/<step>` (also as a tag). At the end the
+   final model is pushed to the root of the same repo.
+6. **Afterwards:** check in the RunPod console that the pod shows as stopped (`autostop.sh` logs to
+   `/workspace/autostop.log`). A stopped pod still costs about $0.014/h for its volume. Terminate it
+   once the model works.
 
-The laptop command is only useful as a smoke test (see above). On Windows the script loads
-`smolvla_base` from a local download, because LeRobot turns a Hub id like `lerobot/smolvla_base` into
-an invalid path with a backslash there. Add `--root <local dataset folder>` to skip the dataset download. The dataset repo is hard-coded in the script
-(`REPO`).
+If training is interrupted, resume from the last local checkpoint with the command in the header of
+`train.sh`.
+
+Notes for this LeRobot version: experiment tracking uses `--trackio.*` (there is no `--wandb.*`).
+The dataset is cached on the container disk (`HF_LEROBOT_HOME=/root/lerobot_data`), because
+`/workspace` is network storage.
+
+#### What happens during training
+
+There is no project-specific training code: `lerobot-train` does everything, in PyTorch (not
+scikit-learn). The relevant parts of LeRobot at the pinned commit:
+
+- [`lerobot_train.py` L852](https://github.com/huggingface/lerobot/blob/3f797de5952432284a7c77ad2760218cb74e2f26/src/lerobot/scripts/lerobot_train.py#L852):
+  the training loop. Each step takes a batch of 64 random frames from the dataset.
+- [`lerobot_train.py` L181](https://github.com/huggingface/lerobot/blob/3f797de5952432284a7c77ad2760218cb74e2f26/src/lerobot/scripts/lerobot_train.py#L181)
+  (`update_policy`): forward pass → `loss`, `accelerator.backward(loss)` (gradients),
+  `optimizer.step()` (AdamW updates the weights), learning-rate scheduler.
+- [`modeling_smolvla.py` L773](https://github.com/huggingface/lerobot/blob/3f797de5952432284a7c77ad2760218cb74e2f26/src/lerobot/policies/smolvla/modeling_smolvla.py#L773):
+  the loss. The model sees both camera images, the instruction and the joint state, gets the
+  recorded next 50 actions mixed with random noise (flow matching), and predicts the direction back
+  to the real actions. The loss is the mean squared error of that prediction.
+
+Only the action expert (100M of the 450M parameters) is trained. The vision-language part of
+`smolvla_base` stays frozen (`freeze_vision_encoder`, `train_expert_only`).
 
 ### 5. Test on the robot
 
 ```
 scripts\rollout.bat green
 scripts\rollout.bat blue
+scripts\rollout.bat green 60 010000      (test the checkpoint from step 10,000)
 ```
 
-It first downloads the model to `models\` (without the training checkpoints; LeRobot on Windows cannot
-load a Hub id directly, see above), then runs for 60 s (a second argument changes the duration). Stop with Ctrl+C and hold the arm while doing
-so. The model runs on the laptop CPU. If the arm moves jerkily or with pauses, try RTC (real-time
+It first downloads the model to `models\` (git-ignored; without the training checkpoints unless one
+is named). LeRobot on Windows cannot load a Hub id directly: it turns `user/model` into the invalid
+`user\model`. Then it runs for 60 s (the second argument changes the duration). Stop with Ctrl+C and
+hold the arm while doing so.
+
+If the final model overfits (stiff motions, only works at the recorded block positions), try an
+earlier checkpoint with the third argument. The model runs on the laptop CPU. If the arm moves jerkily or with pauses, try RTC (real-time
 chunking): add
 `--inference.type=rtc --inference.rtc.execution_horizon=10 --inference.rtc.max_guidance_weight=10.0`
 to `rollout.bat`.

@@ -23,7 +23,7 @@ Copying the motions it saw during training is not enough.
 ```mermaid
 flowchart LR
     A["Teleoperation<br/>leader arm → follower arm<br/>2 cameras, 30 fps"] --> B["Dataset<br/>on Hugging Face Hub"]
-    B --> C["Fine-tune SmolVLA<br/>free Colab T4 GPU"]
+    B --> C["Fine-tune SmolVLA<br/>rented RTX 4090 (RunPod)"]
     C --> D["Model<br/>on Hugging Face Hub"]
     D --> E["Rollout<br/>policy drives the follower<br/>(laptop CPU)"]
 ```
@@ -31,8 +31,8 @@ flowchart LR
 1. **Record:** I move a *leader* arm by hand while the *follower* arm copies it. Two cameras (one from
    above, one from the side) and the joint positions are recorded at 30 fps, together with the
    language instruction for that episode.
-2. **Train:** The laptop has no NVIDIA GPU, so SmolVLA is fine-tuned in a free Google Colab notebook.
-   Checkpoints go to the Hugging Face Hub so that a dropped session can resume.
+2. **Train:** The laptop has no NVIDIA GPU, so SmolVLA is fine-tuned on a rented RTX 4090 on RunPod
+   (about 3 hours for 20,000 steps, ≈ $3). Checkpoints go to the Hugging Face Hub every 2000 steps.
 3. **Run:** The fine-tuned model runs on the laptop CPU and controls the follower arm on its own,
    given only the camera images, the joint state and the instruction.
 
@@ -56,19 +56,20 @@ You can browse the episodes in the browser with the
 - SO-101 leader + follower arm pair
 - Two USB kit cameras on desk clamps
 - A Windows laptop without a dedicated GPU (recording and inference)
-- Google Colab free tier (training)
+- An RTX 4090 rented on RunPod (training)
 - Two wooden blocks (green and blue), a round red box, and masking tape to mark the workspace
 
 ## Repository layout
 
 ```
-colab/train_smolvla.ipynb   Fine-tuning notebook (Colab / RunPod)
 scripts/config.bat          Ports, camera indices, Hugging Face repo names, task strings
 scripts/preview_cameras.py  Live camera preview for aiming and focusing the cameras
 scripts/record.bat          Record teleoperated demonstrations
 scripts/record_cues.py      lerobot-record wrapper with instant audio cues
-scripts/rollout.bat         Run the trained policy on the robot
-scripts/bench_train.py      Measure training speed and estimate total training time
+scripts/rollout.bat         Run the trained policy (or a checkpoint) on the robot
+runpod/setup.sh             One-time LeRobot setup on the RunPod GPU pod
+runpod/train.sh             Fine-tune SmolVLA (20,000 steps, checkpoints to the Hub)
+runpod/autostop.sh          Stop the pod automatically when training has ended
 ```
 
 ## Reproducing it
