@@ -25,7 +25,8 @@ flowchart LR
     A["Teleoperation<br/>leader arm → follower arm<br/>2 cameras, 30 fps"] --> B["Dataset<br/>on Hugging Face Hub"]
     B --> C["Fine-tune SmolVLA<br/>rented RTX 4090 (RunPod)"]
     C --> D["Model<br/>on Hugging Face Hub"]
-    D --> E["Rollout<br/>policy drives the follower<br/>(laptop CPU)"]
+    D --> E["Rollout<br/>policy on the RunPod GPU,<br/>laptop drives the follower"]
+    F["Voice command<br/>'grün' / 'blau'"] --> E
 ```
 
 1. **Record:** I move a *leader* arm by hand while the *follower* arm copies it. Two cameras (one from
@@ -33,8 +34,21 @@ flowchart LR
    language instruction for that episode.
 2. **Train:** The laptop has no NVIDIA GPU, so SmolVLA is fine-tuned on a rented RTX 4090 on RunPod
    (about 3 hours for 20,000 steps, ≈ $3). Checkpoints go to the Hugging Face Hub every 2000 steps.
-3. **Run:** The fine-tuned model runs on the laptop CPU and controls the follower arm on its own,
-   given only the camera images, the joint state and the instruction.
+3. **Run:** The fine-tuned model controls the follower arm on its own, given only the camera images,
+   the joint state and the instruction. On the laptop CPU one prediction takes 53 s, far too slow
+   for a prediction every 1.7 s, so the model runs on the RunPod GPU (0.1 s per prediction) as a
+   LeRobot *policy server*. The laptop sends the camera images through an SSH tunnel and moves the
+   arm with the actions that come back.
+4. **Talk to it:** a German voice command (*"grün"*, *"blau"*, *"stopp"*), recognised offline by
+   Windows, sets the instruction, even while the arm is moving.
+
+## Results so far
+
+- Training: 20,000 steps (batch 64) in about 3 hours on an RTX 4090, ≈ $3.30 in total.
+- Offline check on recorded frames: the predicted motions follow the demonstrations closely, and
+  swapping the colour in the instruction changes the planned motion.
+- On the robot: the task works in principle, more reliably with the **blue** block than with the
+  green one.
 
 ## Dataset
 
@@ -55,21 +69,26 @@ You can browse the episodes in the browser with the
 
 - SO-101 leader + follower arm pair
 - Two USB kit cameras on desk clamps
-- A Windows laptop without a dedicated GPU (recording and inference)
-- An RTX 4090 rented on RunPod (training)
+- A Windows laptop without a dedicated GPU (recording, robot control, speech recognition)
+- An RTX 4090 rented on RunPod (training and inference)
 - Two wooden blocks (green and blue), a round red box, and masking tape to mark the workspace
 
 ## Repository layout
 
 ```
-scripts/config.bat          Ports, camera indices, Hugging Face repo names, task strings
+scripts/config.bat          Ports, camera IDs, pod address, Hugging Face repo names, task strings
+scripts/find_cameras.py     Find the kit cameras' current OpenCV indices by USB ID
 scripts/preview_cameras.py  Live camera preview for aiming and focusing the cameras
 scripts/record.bat          Record teleoperated demonstrations
 scripts/record_cues.py      lerobot-record wrapper with instant audio cues
-scripts/rollout.bat         Run the trained policy (or a checkpoint) on the robot
+scripts/rollout_remote.bat  Run the policy on the robot, inference on the RunPod GPU
+scripts/voice_control.py    Voice control ("grün", "blau", "stopp") for rollout_remote.bat voice
+scripts/rollout.bat         Run the policy with inference on the laptop CPU (too slow, reference only)
 runpod/setup.sh             One-time LeRobot setup on the RunPod GPU pod
 runpod/train.sh             Fine-tune SmolVLA (20,000 steps, checkpoints to the Hub)
 runpod/autostop.sh          Stop the pod automatically when training has ended
+runpod/serve.sh             Start the policy server (final model or a checkpoint)
+runpod/server.yaml          Policy server configuration (model, robot schema, cameras)
 ```
 
 ## Reproducing it

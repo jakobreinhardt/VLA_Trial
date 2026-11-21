@@ -3,10 +3,16 @@
 Use it to aim and focus the cameras and to check that the indices in config.bat are right.
 Keys: s = save reference snapshot to reference/, q = quit.
 Usage: python scripts/preview_cameras.py [top_index] [side_index]
+Without arguments it finds the cameras by the USB IDs in scripts/config.bat (CAM_TOP_ID,
+CAM_SIDE_ID), exactly like record.bat and the rollout scripts do.
+
+The cameras are opened with OpenCV's default backend (CAP_ANY), like LeRobot. On this laptop that
+resolves to DirectShow, whose numbering find_cameras.py reads.
 
 LeRobot needs opencv-python-headless (no cv2.imshow), so the window is drawn with Tkinter.
 """
 
+import re
 import sys
 import time
 import tkinter as tk
@@ -16,17 +22,27 @@ import cv2
 import numpy as np
 from PIL import Image, ImageTk
 
-indices = [int(a) for a in sys.argv[1:3]] or [1, 2]
+
+def config_indices() -> list[int]:
+    from find_cameras import find_indices  # same folder
+
+    text = (Path(__file__).resolve().parent / "config.bat").read_text()
+    ids = dict(re.findall(r'set "(CAM_TOP_ID|CAM_SIDE_ID)=([^"]+)"', text))
+    return find_indices(ids["CAM_TOP_ID"], ids["CAM_SIDE_ID"])
+
+
+indices = [int(a) for a in sys.argv[1:3]] or config_indices()
 names = ["top", "side"][: len(indices)]
 caps = []
 for i in indices:
-    cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
+    cap = cv2.VideoCapture(i, cv2.CAP_ANY)
     cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
     cap.set(cv2.CAP_PROP_FPS, 30)
     if not cap.isOpened():
         sys.exit(f"camera {i} could not be opened (in use by another program?)")
+    print(f"{names[len(caps)]}: index {i}, backend {cap.getBackendName()}")
     caps.append(cap)
 
 out_dir = Path(__file__).resolve().parent.parent / "reference"
